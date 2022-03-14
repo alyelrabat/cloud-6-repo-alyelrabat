@@ -1,0 +1,734 @@
+param location string = 'west europe'
+
+/// APP_ LINUX ///
+
+param vnet1 string = 'app-prd-vnet'
+param appsub1 string = 'Application-sub-net'
+param nsgapp string = 'nsg-app-http-https'
+param nsg_app_rules_ssh string = 'nsg_apprules_ssh'
+param nic_app_vm string  = 'nic_linux'
+param pip_app_linux string = 'pip_linux_web'
+param vm_linux string = 'Linux_VM'
+
+/// ADMIN_WINDOWS ///
+
+param vnet2 string = 'man-prd-vnet'
+param adminsub1 string = 'Management-sub-net'
+param nsgadmin string = 'nsg-Management-3389'
+param nic_admin_vm string  = 'nic_Windows'
+param pip_admin_windows string = 'pip_windows_admin'
+param vm_windows string = 'Windows_VM'
+param OSVersionWin string = '2019-Datacenter'
+
+/// KEYVAULT,KEYS,ENCRYPT - PARAM ///
+
+param DISKencryptionsetname string = 'DiskEncryption'
+
+@description('Username for the Win Virtual Machine.')
+param adminUsernameWin string
+
+@description('Password for the Win Virtual Machine.')
+@minLength(14) 
+@secure()
+param adminPasswordWin string 
+
+var backupFabric = 'Azure'
+var protec_container_app_linux = 'iaasvmcontainer;iaasvmcontainerv2;${resourceGroup().name};${vm_linux}'
+var protec_Item_app_linux = 'vm;iaasvmcontainerv2;${resourceGroup().name};${vm_linux}'
+var protec_container_admin_win = 'iaasvmcontainer;iaasvmcontainerv2;${resourceGroup().name};${vm_windows}'
+var protec_Item_admin_windows = 'vm;iaasvmcontainerv2;${resourceGroup().name};${vm_windows}'
+
+
+
+
+// var script64 = loadFileAsBase64('../bootstrapscript/zscript.sh') //
+
+
+
+/// VNET_APP /// SUBNET_APP /// NSG_APP /// NSG_APP_SSH /// PEER_VNET_APP /// 
+
+resource APP_VNET 'Microsoft.Network/virtualNetworks@2021-05-01' = {
+  name: vnet1
+  location: location
+   properties:{
+    addressSpace: {
+      addressPrefixes: [
+        '10.10.10.0/24'
+      ]
+    }
+    enableDdosProtection: false
+  }
+}
+
+resource APP_SUBNET 'Microsoft.Network/virtualNetworks/subnets@2021-05-01' = {
+  name: appsub1
+  properties: {
+    addressPrefix: '10.20.20.0/25'
+    privateEndpointNetworkPolicies: 'Enabled'
+    privateLinkServiceNetworkPolicies: 'Enabled'
+    networkSecurityGroup:{
+      id: NSG_APP.id
+    }
+    serviceEndpoints: [
+      {
+        service: 'Microsoft.KeyVault'
+        locations: [
+          '*'
+        ]
+      }
+    ]
+  }
+  dependsOn: [
+    APP_VNET
+  ]
+}
+
+resource NSG_APP 'Microsoft.Network/networkSecurityGroups@2021-05-01' = {
+  name: nsgapp
+  location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'app_nsg_https'
+        properties: {
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: '*'
+          destinationAddressPrefix: '*'
+          access: 'Allow'
+          priority: 100
+          direction: 'Inbound'
+          sourcePortRanges: []
+          destinationPortRanges: []
+          sourceAddressPrefixes: []
+          destinationAddressPrefixes: []
+        } 
+      }
+      {
+        name: 'app_nsg_http'
+        properties: {
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '80'
+          sourceAddressPrefix: '*'
+          destinationAddressPrefix: '*'
+          access: 'Allow'
+          priority: 120
+          direction: 'Inbound'
+          sourcePortRanges: []
+          destinationPortRanges: []
+          sourceAddressPrefixes: []
+          destinationAddressPrefixes: []
+        }
+      }
+    ]
+  }
+}
+
+resource NSG_APP_SSH 'Microsoft.Network/networkSecurityGroups/securityRules@2021-05-01' = { 
+  parent: NSG_APP
+  name: nsg_app_rules_ssh
+  properties: {
+    protocol: 'Tcp'
+    sourcePortRange: '*'
+    destinationPortRange: '22'
+    sourceAddressPrefix: NIC_ADMIN_WIN.properties.ipConfigurations[0].properties.privateIPAddress
+    destinationAddressPrefix: NIC_APP_LINUX.properties.ipConfigurations[0].properties.privateIPAddress
+    access: 'Allow'
+    priority: 140
+    direction: 'Inbound'
+  }
+}
+
+resource PEER_VNET_APP 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2020-05-01' = {
+  parent: APP_VNET
+  name: '${vnet1}-${vnet2}'
+  properties: {
+    allowVirtualNetworkAccess: true
+    allowForwardedTraffic: false
+    allowGatewayTransit: false
+    useRemoteGateways: false
+    remoteVirtualNetwork: {
+      id: ADMIN_VNET.id
+    }
+  }
+  dependsOn: [
+    APP_SUBNET
+    ADMIN_SUBNET
+  ]
+}
+
+/// NIC_APP_LINUX /// PIP_APP /// VM_APP_LINUX ///
+
+resource NIC_APP_LINUX 'Microsoft.Network/networkInterfaces@2020-06-01' = {
+  name: nic_app_vm
+  location: location
+  properties: {
+    ipConfigurations: [
+      {
+        name: 'ipconfig1'
+        properties: {
+          privateIPAddress:'10.10.10.8'
+          privateIPAllocationMethod: 'Dynamic'
+          publicIPAddress: {
+            id: PIP_APP.id
+          }
+          subnet: {
+            id: APP_SUBNET.id
+          }
+          primary: true
+          privateIPAddressVersion: 'IPv4'
+        }
+      }
+    ] 
+    dnsSettings: {
+      dnsServers: []
+    }
+    enableAcceleratedNetworking: false
+    enableIPForwarding: false
+  }
+}
+
+resource PIP_APP 'Microsoft.Network/publicIPAddresses@2020-06-01' = {
+  name: pip_app_linux
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  zones: [
+    '1'
+  ]
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource VM_APP_LINUX 'Microsoft.Compute/virtualMachines@2021-11-01' = { 
+  name: vm_linux
+  location: location
+  zones: [
+    '2'
+  ]
+  properties: { 
+    userData: script64
+    hardwareProfile: {
+      vmSize: 'Standard_B1s'
+    }
+    storageProfile: {
+      imageReference: {
+        publisher: 'Canonical'
+        offer: '0001-com-ubuntu-server-impish'
+        sku: '21_10-gen2'
+        version: 'latest'
+      }
+      osDisk: {
+        osType: 'Linux'
+        createOption: 'FromImage'
+        managedDisk: {
+          diskEncryptionSet: {
+            id: DISK_ENCRYPT_SET.id
+          }
+          storageAccountType:'StandardSSD_LRS'
+        }
+        deleteOption: 'Delete'
+      }
+      dataDisks: []
+    }
+    osProfile: {
+      computerName: vm_linux
+      adminUsername: '${vm_linux}user'
+      adminPassword: null
+      linuxConfiguration: {
+        ssh: {
+          publicKeys: [
+            {
+              keyData: pubkey
+              path: '/home${vm_linux}/.ssh/authorized_keys'
+            }
+          ]
+        }
+        provisionVMAgent: true
+        patchSettings: {
+          patchMode: 'ImageDefault'
+          assessmentMode: 'ImageDefault'
+        }
+      }
+      secrets: []
+      allowExtensionOperations: true
+      
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: NIC_APP_LINUX.id
+          properties: {
+            deleteOption: 'Detach'
+          }
+        }
+      ]
+    }
+    diagnosticsProfile: {
+      bootDiagnostics: {
+        enabled: true
+      }
+    }
+  }
+}
+
+/// VNET_ADMIN /// SUBNET_ADMIN /// NSG_ADMIN /// PEER_VNET_ADMIN /// 
+
+resource ADMIN_VNET 'Microsoft.Network/virtualNetworks@2021-05-01' = {
+  name: vnet2
+  location: location
+   properties:{
+    addressSpace: {
+      addressPrefixes: [
+        '10.20.20.0/24'
+      ]
+    }
+    enableDdosProtection: false
+  }
+}
+
+resource ADMIN_SUBNET 'Microsoft.Network/virtualNetworks/subnets@2021-05-01' = {
+  name: adminsub1
+  properties: {
+    addressPrefix: '10.10.10.0/26'
+    privateEndpointNetworkPolicies: 'Enabled'
+    privateLinkServiceNetworkPolicies: 'Enabled'
+    networkSecurityGroup:{
+      id: NSG_ADMIN.id
+    }
+    serviceEndpoints: [
+      {
+        service: 'Microsoft.KeyVault'
+        locations: [
+          '*'
+        ]
+      }
+    ]
+  }
+  dependsOn: [
+    ADMIN_VNET
+  ]
+}
+
+resource NSG_ADMIN 'Microsoft.Network/networkSecurityGroups@2021-05-01' = {
+  name: nsgadmin
+  location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'admin_nsg'
+        properties: {
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '3389'
+          sourceAddressPrefix: '*'
+          destinationAddressPrefix: '*'
+          access: 'Allow'
+          priority: 160
+          direction: 'Inbound'
+          sourcePortRanges: []
+          destinationPortRanges: []
+          sourceAddressPrefixes: []
+          destinationAddressPrefixes: []
+        }
+      }
+    ]
+  }
+}
+
+resource PEER_VNET_ADMIN'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2020-05-01' = {
+  parent: APP_VNET
+  name: '${vnet1}-${vnet2}'
+  properties: {
+    allowVirtualNetworkAccess: true
+    allowForwardedTraffic: false
+    allowGatewayTransit: false
+    useRemoteGateways: false
+    remoteVirtualNetwork: {
+      id: APP_VNET.id
+    }
+  }
+  dependsOn: [
+    APP_SUBNET
+    ADMIN_SUBNET
+  ]
+}
+
+/// NIC_ADMIN_WIN /// PIP_ADMIN /// VM_ADMIN_WIN ///
+
+
+resource NIC_ADMIN_WIN 'Microsoft.Network/networkInterfaces@2020-06-01' = {
+  name: nic_admin_vm
+  location: location
+  properties: {
+    ipConfigurations: [
+      {
+        name: 'ipconfig1'
+        properties: {
+          privateIPAddress:'10.10.10.16'
+          privateIPAllocationMethod: 'Dynamic'
+          publicIPAddress: {
+            id: PIP_ADMIN.id
+          }
+          subnet: {
+            id: ADMIN_SUBNET.id
+          }
+          primary: true
+          privateIPAddressVersion: 'IPv4'
+        }
+      }
+    ] 
+    dnsSettings: {
+      dnsServers: []
+    }
+    enableAcceleratedNetworking: false
+    enableIPForwarding: false
+  }
+}
+
+resource PIP_ADMIN  'Microsoft.Network/publicIPAddresses@2020-06-01' = {
+  name: pip_admin_windows
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  zones: [
+    '1'
+  ]
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource VM_ADMIN_WIN 'Microsoft.Compute/virtualMachines@2021-03-01' = {
+  name: vm_windows
+  location: location
+  zones: [
+    '1'
+  ]
+  properties: {
+    hardwareProfile: {
+      vmSize: 'Standard_B1s'
+    }
+    osProfile: {
+      computerName: vm_windows
+      adminUsername: adminUsernameWin
+      adminPassword: adminPasswordWin
+      windowsConfiguration: {
+        enableAutomaticUpdates: true
+        provisionVMAgent: true
+        patchSettings: {
+          patchMode: 'AutomaticByOS'
+          assessmentMode: 'ImageDefault'
+          enableHotpatching: false
+        }
+      }
+      secrets: []
+      allowExtensionOperations: true
+    }
+    storageProfile: {
+      imageReference: {
+        publisher: 'MicrosoftWindowsServer'
+        offer: 'WindowsServer'
+        sku: OSVersionWin
+        version: 'latest'
+      }
+      osDisk: {
+        osType: 'Windows'
+        createOption: 'FromImage'
+        caching: 'ReadWrite'
+        managedDisk: {
+          diskEncryptionSet: {
+            id: DISK_ENCRYPT_SET.id
+          }
+          storageAccountType: 'StandardSSD_LRS'
+        }
+        deleteOption: 'Delete'
+      }
+      dataDisks: []
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: NIC_ADMIN_WIN.id
+          properties: {
+            deleteOption: 'Detach'
+          }
+        }
+      ]
+    }
+    diagnosticsProfile: {
+      bootDiagnostics: {
+        enabled: true
+      }
+    }
+  }
+}
+
+/// DISK_ENCRYPT_SET /// KEY_VAULT /// MAN_ID /// ACCES_POL /// KEY ///
+
+resource DISK_ENCRYPT_SET 'Microsoft.Compute/diskEncryptionSets@2021-08-01' = {  
+  name: DISKencryptionsetname
+  location:location
+  identity: {
+    type:'SystemAssigned'
+  }
+  properties: {
+    rotationToLatestKeyVersionEnabled: true
+    activeKey: {
+      sourceVault: {
+        id: KEY_VAULT.id
+      }
+      keyUrl: KEY.properties.keyUriWithVersion
+    }
+    encryptionType: 'EncryptionAtRestWithCustomerKey'
+  }
+}
+
+resource KEY_VAULT 'Microsoft.KeyVault/vaults@2019-09-01' = {
+  name: 'kluisproject2'
+  location: location
+  properties: {
+    enabledForDeployment: true
+    enabledForTemplateDeployment: true
+    enabledForDiskEncryption: true
+    enableSoftDelete:true
+    enablePurgeProtection: true
+    softDeleteRetentionInDays: 7
+    tenantId: 'de60b253-74bd-4365-b598-b9e55a2b208d'
+    accessPolicies: [
+      {
+        tenantId: 'de60b253-74bd-4365-b598-b9e55a2b208d'
+        objectId: '9346c2ae-a148-4d97-b928-1aa7a575c37e'
+        permissions: {
+          keys: [
+            'all'
+          ]
+          secrets: [
+            'list'
+            'get'
+            'all'
+          ]
+          storage: [
+            'all'
+          ]
+          certificates: [
+            'all'
+          ]
+        }
+      }
+    ]
+    sku: {
+      name: 'standard'
+      family: 'A'
+    }
+  }
+}
+
+resource MAN_ID 'Microsoft.ManagedIdentity/userAssignedIdentities@2018-11-30' = {
+  name: 'ManID'
+  location: location
+  dependsOn: [
+    KEY_VAULT
+  ]
+}
+
+resource ACCES_POL 'Microsoft.KeyVault/vaults/accessPolicies@2021-10-01' = { 
+  name:  'add'
+  parent: KEY_VAULT
+  properties: {
+    accessPolicies:[
+      {
+        tenantId: 'tde60b253-74bd-4365-b598-b9e55a2b208d'
+        objectId: DISK_ENCRYPT_SET.identity.principalId
+        permissions: {
+          keys: [
+            'get'
+            'wrapKey'
+            'unwrapKey'
+          ]
+          secrets: []
+          certificates: []
+        }
+        
+      }
+      {
+        tenantId: 'de60b253-74bd-4365-b598-b9e55a2b208d'
+        objectId: MAN_ID.properties.principalId
+        permissions: {
+          keys: [
+            'get'
+            'list'
+            'unwrapKey'
+            'wrapKey'
+          ]
+          secrets: []
+          certificates: []
+        }
+      }
+    ]
+  }
+}
+
+resource KEY 'Microsoft.KeyVault/vaults/keys@2021-11-01-preview' = {
+  name: 'RSAkey'
+  parent: KEY_VAULT
+  properties: {
+    keyOps: [
+      'decrypt'
+      'encrypt'
+      'unwrapKey'
+      'wrapKey'
+      'sign'
+      'verify'
+    ]
+    attributes: {
+      enabled: true
+    }
+    keySize: 2048
+    kty:'RSA'
+  }
+}
+
+resource SECRET 'Microsoft.KeyVault/vaults/secrets@2021-10-01' = {
+  parent: KEY_VAULT
+  name: 'ssh'
+  properties: {
+    value: loadTextContent('../etc/SSHKey.pub')
+  }
+}
+
+
+/// STOR_ACC /// BLOB /// BLOB_CON /// REC_VAULT /// BACK_POL /// APP_PROTEC /// ADMIN_PROTEC ///
+
+resource STOR_ACC 'Microsoft.Storage/storageAccounts@2021-08-01' = {
+  name: 'storageproject1_0'
+  location: location
+  kind: 'StorageV2'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${MAN_ID.id}': {}
+    }
+  }
+  sku:{
+    name: 'Standard_LRS'
+  } 
+  properties: {
+    defaultToOAuthAuthentication: false
+    allowCrossTenantReplication: false
+    allowBlobPublicAccess: false
+    accessTier: 'Hot'
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+    largeFileSharesState: 'Disabled'
+    allowSharedKeyAccess: true
+    encryption: {
+      keySource: 'Microsoft.Keyvault'
+      keyvaultproperties: {
+         keyname:KEY.name
+         keyvaulturi:KEY_VAULT.properties.vaultUri
+      }
+      services: {
+        blob: {
+          enabled: true
+        }
+      }
+    }
+  }
+}
+
+resource BLOB 'Microsoft.Storage/storageAccounts/blobServices@2021-08-01' = {
+  name: 'default'
+  parent:  STOR_ACC
+  properties: {
+    containerDeleteRetentionPolicy: {
+      days: 30
+      enabled: true
+    }
+    changeFeed: {
+      enabled: false
+    }
+    automaticSnapshotPolicyEnabled: true
+    isVersioningEnabled: true
+    restorePolicy: {
+      enabled: true
+      days: 7
+    }
+
+  }
+}
+   
+resource BLOB_CON 'Microsoft.Storage/storageAccounts/blobServices/containers@2021-08-01'={
+  parent: BLOB
+  name: 'script64'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource REC_VAULT 'Microsoft.RecoveryServices/vaults@2021-08-01' = { 
+  name: 'recoveryvault'
+  location: location
+  sku: {
+    tier: 'Standard'
+    name: 'RS0'
+  }
+  properties: {}
+} 
+
+resource BACK_POL 'Microsoft.RecoveryServices/vaults/backupPolicies@2021-12-01' = {
+ location: location
+ parent: REC_VAULT
+ name: 'back_policy'
+ properties: {
+   backupManagementType: 'AzureIaasVM'
+   schedulePolicy: {
+     schedulePolicyType: 'SimpleSchedulePolicy'
+     scheduleRunFrequency: 'Daily'
+     scheduleRunTimes: [
+       '22-03-03T04:00:00Z'
+     ]
+     scheduleWeeklyFrequency: 0
+    }
+    retentionPolicy: {
+      retentionPolicyType: 'LongTermRetentionPolicy'
+      dailySchedule: {
+        retentionTimes: [
+          '22-03-03T04:00:00Z'
+        ]
+        retentionDuration: {
+          count: 7
+          durationType: 'Days'
+        }
+      }
+    }
+    instantRpRetentionRangeInDays: 7
+    timeZone: 'W. Europe Standard Time'
+  }
+}
+
+resource protecteditem_vmserver_sym_link 'Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems@2021-12-01' = {
+  name: '${REC_VAULT}/${backupFabric}/${protec_container_app_linux}/${protec_Item_app_linux }'
+  location: location
+  properties: {
+    protectedItemType: 'Microsoft.Compute/virtualMachines'
+    policyId: BACK_POL.id
+    sourceResourceId: VM_APP_LINUX.id
+  }
+} 
+
+resource protecteditem_adminserver_sym_link 'Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems@2021-12-01' = {
+  name: '${REC_VAULT}/${backupFabric}/${protec_container_admin_win}/${protec_Item_admin_windows}' 
+  location: location
+  properties: {
+    protectedItemType: 'Microsoft.Compute/virtualMachines'
+    policyId: BACK_POL.id
+    sourceResourceId: VM_ADMIN_WIN.id
+  }
+} 
+ 
