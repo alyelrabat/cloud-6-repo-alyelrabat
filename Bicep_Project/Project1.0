@@ -41,7 +41,7 @@ var protec_Item_admin_windows = 'vm;iaasvmcontainerv2;${resourceGroup().name};${
 
 
 
-// var script64 = loadFileAsBase64('../bootstrapscript/zscript.sh') //
+
 
 
 
@@ -243,8 +243,8 @@ resource VM_APP_LINUX 'Microsoft.Compute/virtualMachines@2021-11-01' = {
         ssh: {
           publicKeys: [
             {
-              keyData: pubkey
-              path: '/home${vm_linux}/.ssh/authorized_keys'
+              keyData: 
+              path: 
             }
           ]
         }
@@ -598,7 +598,7 @@ resource SECRET 'Microsoft.KeyVault/vaults/secrets@2021-10-01' = {
   parent: KEY_VAULT
   name: 'ssh'
   properties: {
-    value: loadTextContent('../etc/SSHKey.pub')
+    value: 
   }
 }
 
