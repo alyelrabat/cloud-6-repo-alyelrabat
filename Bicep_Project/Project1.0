@@ -2,22 +2,22 @@ param location string = 'west europe'
 
 /// APP_ LINUX ///
 
-param vnet1 string = 'app-prd-vnet'
-param appsub1 string = 'Application-sub-net'
+param vnet1 string = 'app_vnet'
+//param appsub1 string = 'Application-sub-net'
 param nsgapp string = 'nsg-app-http-https'
 param nsg_app_rules_ssh string = 'nsg_apprules_ssh'
 param nic_app_vm string  = 'nic_linux'
 param pip_app_linux string = 'pip_linux_web'
-param vm_linux string = 'Linux_VM'
+param vm_linux string = 'LinuxVM'
 
 /// ADMIN_WINDOWS ///
 
-param vnet2 string = 'man-prd-vnet'
-param adminsub1 string = 'Management-sub-net'
+param vnet2 string = 'man_vnet'
+//param adminsub1 string = 'Management-sub-net'
 param nsgadmin string = 'nsg-Management-3389'
 param nic_admin_vm string  = 'nic_Windows'
 param pip_admin_windows string = 'pip_windows_admin'
-param vm_windows string = 'Windows_VM'
+param vm_windows string = 'WindowsVM'
 param OSVersionWin string = '2019-Datacenter'
 
 /// KEYVAULT,KEYS,ENCRYPT - PARAM ///
@@ -41,11 +41,19 @@ var protec_Item_admin_windows = 'vm;iaasvmcontainerv2;${resourceGroup().name};${
 
 
 
+var script64 = loadFileAsBase64('./bootstrapscript/apache.sh') 
+param store_name string = 'stvm${uniqueString(resourceGroup().id)}'
+param utcValue string = utcNow()
+param apachefile string = 'zscript.sh'
 
+param pubkey string = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC/VNMqEoUH2yLjwoDxXyHZFkssHUNqTKSHck4QZTYxqhhrpOgM3r6Y2lzymj5lDDpogERNqZz9RyFOFUClByRIXN95Sq/EvMa8nwGr+F8go9EFsMq1W5EFmChPWPyT3+y1gz3JcacocPZr6ru99LTTFU6DRuRJtraYmjJ7oEAD012mXYEnN4rXUTLXPQbJmxHjP+sS9ye71VjbwRt/QfRGbH1KuvVZ2MLhgLfxOdNMEmns0XgOj4nhLAlpOXYlOXs6eNiwNGNDaGfDIk8KjWqQPkqpxNEzIFz5F9rYCDs8eaKv1VijKjgLTdrrVfuMvXKgl7FjYmMRFO+BeXD5WSgl rsa-key-20220317'
+
+//param pubkey string = loadTextContent('./KEYz/kluisproject19-RSAkey-20220315.pem')
 
 
 
 /// VNET_APP /// SUBNET_APP /// NSG_APP /// NSG_APP_SSH /// PEER_VNET_APP /// 
+
 
 resource APP_VNET 'Microsoft.Network/virtualNetworks@2021-05-01' = {
   name: vnet1
@@ -53,7 +61,7 @@ resource APP_VNET 'Microsoft.Network/virtualNetworks@2021-05-01' = {
    properties:{
     addressSpace: {
       addressPrefixes: [
-        '10.10.10.0/24'
+        '10.20.20.0/24'
       ]
     }
     enableDdosProtection: false
@@ -61,9 +69,11 @@ resource APP_VNET 'Microsoft.Network/virtualNetworks@2021-05-01' = {
 }
 
 resource APP_SUBNET 'Microsoft.Network/virtualNetworks/subnets@2021-05-01' = {
-  name: appsub1
+  name: '${vnet1}appserver_subnet'
+  parent: APP_VNET
   properties: {
-    addressPrefix: '10.20.20.0/25'
+    addressPrefix: '10.20.20.0/24'
+    delegations:[]
     privateEndpointNetworkPolicies: 'Enabled'
     privateLinkServiceNetworkPolicies: 'Enabled'
     networkSecurityGroup:{
@@ -78,9 +88,7 @@ resource APP_SUBNET 'Microsoft.Network/virtualNetworks/subnets@2021-05-01' = {
       }
     ]
   }
-  dependsOn: [
-    APP_VNET
-  ]
+
 }
 
 resource NSG_APP 'Microsoft.Network/networkSecurityGroups@2021-05-01' = {
@@ -150,16 +158,17 @@ resource PEER_VNET_APP 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings
     allowGatewayTransit: false
     useRemoteGateways: false
     remoteVirtualNetwork: {
-      id: ADMIN_VNET.id
+      id:ADMIN_VNET.id
     }
   }
   dependsOn: [
-    APP_SUBNET
     ADMIN_SUBNET
+    APP_SUBNET
   ]
 }
 
 /// NIC_APP_LINUX /// PIP_APP /// VM_APP_LINUX ///
+
 
 resource NIC_APP_LINUX 'Microsoft.Network/networkInterfaces@2020-06-01' = {
   name: nic_app_vm
@@ -243,8 +252,8 @@ resource VM_APP_LINUX 'Microsoft.Compute/virtualMachines@2021-11-01' = {
         ssh: {
           publicKeys: [
             {
-              keyData: 
-              path: 
+              keyData: pubkey
+              path: '/home/LinuxVMuser/.ssh/authorized_keys'    //'/home/LinuxVMuser/.ssh/authorized_keys'     '/home${vm_linux}/.ssh/authorized_keys'
             }
           ]
         }
@@ -278,13 +287,14 @@ resource VM_APP_LINUX 'Microsoft.Compute/virtualMachines@2021-11-01' = {
 
 /// VNET_ADMIN /// SUBNET_ADMIN /// NSG_ADMIN /// PEER_VNET_ADMIN /// 
 
+
 resource ADMIN_VNET 'Microsoft.Network/virtualNetworks@2021-05-01' = {
   name: vnet2
   location: location
    properties:{
     addressSpace: {
       addressPrefixes: [
-        '10.20.20.0/24'
+        '10.10.10.0/24'
       ]
     }
     enableDdosProtection: false
@@ -292,9 +302,12 @@ resource ADMIN_VNET 'Microsoft.Network/virtualNetworks@2021-05-01' = {
 }
 
 resource ADMIN_SUBNET 'Microsoft.Network/virtualNetworks/subnets@2021-05-01' = {
-  name: adminsub1
+  name: '${vnet2}adminserver_subnet'
+  parent: ADMIN_VNET
+  
   properties: {
-    addressPrefix: '10.10.10.0/26'
+    addressPrefix: '10.10.10.0/24'
+    delegations:[]
     privateEndpointNetworkPolicies: 'Enabled'
     privateLinkServiceNetworkPolicies: 'Enabled'
     networkSecurityGroup:{
@@ -309,9 +322,8 @@ resource ADMIN_SUBNET 'Microsoft.Network/virtualNetworks/subnets@2021-05-01' = {
       }
     ]
   }
-  dependsOn: [
-    ADMIN_VNET
-  ]
+
+ 
 }
 
 resource NSG_ADMIN 'Microsoft.Network/networkSecurityGroups@2021-05-01' = {
@@ -341,20 +353,20 @@ resource NSG_ADMIN 'Microsoft.Network/networkSecurityGroups@2021-05-01' = {
 }
 
 resource PEER_VNET_ADMIN'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2020-05-01' = {
-  parent: APP_VNET
-  name: '${vnet1}-${vnet2}'
+  parent: ADMIN_VNET
+  name: '${vnet2}-${vnet1}'
   properties: {
     allowVirtualNetworkAccess: true
     allowForwardedTraffic: false
     allowGatewayTransit: false
     useRemoteGateways: false
     remoteVirtualNetwork: {
-      id: APP_VNET.id
+      id:APP_VNET.id
     }
   }
   dependsOn: [
-    APP_SUBNET
     ADMIN_SUBNET
+    APP_SUBNET
   ]
 }
 
@@ -471,6 +483,7 @@ resource VM_ADMIN_WIN 'Microsoft.Compute/virtualMachines@2021-03-01' = {
 
 /// DISK_ENCRYPT_SET /// KEY_VAULT /// MAN_ID /// ACCES_POL /// KEY ///
 
+
 resource DISK_ENCRYPT_SET 'Microsoft.Compute/diskEncryptionSets@2021-08-01' = {  
   name: DISKencryptionsetname
   location:location
@@ -489,10 +502,14 @@ resource DISK_ENCRYPT_SET 'Microsoft.Compute/diskEncryptionSets@2021-08-01' = {
   }
 }
 
-resource KEY_VAULT 'Microsoft.KeyVault/vaults@2019-09-01' = {
-  name: 'kluisproject2'
+resource KEY_VAULT 'Microsoft.KeyVault/vaults@2021-06-01-preview' = {
+  name: 'kluisproject28'
   location: location
   properties: {
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
     enabledForDeployment: true
     enabledForTemplateDeployment: true
     enabledForDiskEncryption: true
@@ -506,18 +523,46 @@ resource KEY_VAULT 'Microsoft.KeyVault/vaults@2019-09-01' = {
         objectId: '9346c2ae-a148-4d97-b928-1aa7a575c37e'
         permissions: {
           keys: [
-            'all'
+            'backup'
+            'create'
+            'delete'
+            'get'
+            'import'
+            'list'
+            'recover'
+            'restore'
+            'getrotationpolicy'
+            'setrotationpolicy'
+            'rotate'
+            
+
           ]
           secrets: [
             'list'
+            'set'
             'get'
-            'all'
-          ]
-          storage: [
-            'all'
+            'delete'
+            'backup'
+            'restore'
+            'recover'
+
           ]
           certificates: [
-            'all'
+            'get'
+            'backup'
+            'create'
+            'delete'
+            'recover'
+            'restore'
+            'list'
+            'managecontacts'
+            'manageissuers'
+            'import'
+            'update'
+            'listissuers'
+            'getissuers'
+            'setissuers'
+            'deleteissuers'
           ]
         }
       }
@@ -543,7 +588,7 @@ resource ACCES_POL 'Microsoft.KeyVault/vaults/accessPolicies@2021-10-01' = {
   properties: {
     accessPolicies:[
       {
-        tenantId: 'tde60b253-74bd-4365-b598-b9e55a2b208d'
+        tenantId: 'de60b253-74bd-4365-b598-b9e55a2b208d'
         objectId: DISK_ENCRYPT_SET.identity.principalId
         permissions: {
           keys: [
@@ -598,15 +643,15 @@ resource SECRET 'Microsoft.KeyVault/vaults/secrets@2021-10-01' = {
   parent: KEY_VAULT
   name: 'ssh'
   properties: {
-    value: 
+    value: loadTextContent('./keysecret/secretkeyproject.pub')
   }
 }
 
-
 /// STOR_ACC /// BLOB /// BLOB_CON /// REC_VAULT /// BACK_POL /// APP_PROTEC /// ADMIN_PROTEC ///
 
+
 resource STOR_ACC 'Microsoft.Storage/storageAccounts@2021-08-01' = {
-  name: 'storageproject1_0'
+  name: 'storageproject1'
   location: location
   kind: 'StorageV2'
   identity: {
@@ -630,8 +675,9 @@ resource STOR_ACC 'Microsoft.Storage/storageAccounts@2021-08-01' = {
     encryption: {
       keySource: 'Microsoft.Keyvault'
       keyvaultproperties: {
-         keyname:KEY.name
+         keyname: 'RSAkey'    //KEY.name
          keyvaulturi:KEY_VAULT.properties.vaultUri
+         //keyversion:[]
       }
       services: {
         blob: {
@@ -691,7 +737,7 @@ resource BACK_POL 'Microsoft.RecoveryServices/vaults/backupPolicies@2021-12-01' 
      schedulePolicyType: 'SimpleSchedulePolicy'
      scheduleRunFrequency: 'Daily'
      scheduleRunTimes: [
-       '22-03-03T04:00:00Z'
+       '2022-03-03T04:00:00Z'
      ]
      scheduleWeeklyFrequency: 0
     }
@@ -699,7 +745,7 @@ resource BACK_POL 'Microsoft.RecoveryServices/vaults/backupPolicies@2021-12-01' 
       retentionPolicyType: 'LongTermRetentionPolicy'
       dailySchedule: {
         retentionTimes: [
-          '22-03-03T04:00:00Z'
+          '2022-03-03T04:00:00Z'
         ]
         retentionDuration: {
           count: 7
@@ -707,14 +753,13 @@ resource BACK_POL 'Microsoft.RecoveryServices/vaults/backupPolicies@2021-12-01' 
         }
       }
     }
-    instantRpRetentionRangeInDays: 7
+    instantRpRetentionRangeInDays: 2
     timeZone: 'W. Europe Standard Time'
   }
 }
 
-resource protecteditem_vmserver_sym_link 'Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems@2021-12-01' = {
-  name: '${REC_VAULT}/${backupFabric}/${protec_container_app_linux}/${protec_Item_app_linux }'
-  location: location
+resource PROTEC_VM_WEB 'Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems@2021-12-01' = {
+  name: '${'recoveryvault'}/${backupFabric}/${protec_container_app_linux}/${protec_Item_app_linux }'
   properties: {
     protectedItemType: 'Microsoft.Compute/virtualMachines'
     policyId: BACK_POL.id
@@ -722,9 +767,8 @@ resource protecteditem_vmserver_sym_link 'Microsoft.RecoveryServices/vaults/back
   }
 } 
 
-resource protecteditem_adminserver_sym_link 'Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems@2021-12-01' = {
-  name: '${REC_VAULT}/${backupFabric}/${protec_container_admin_win}/${protec_Item_admin_windows}' 
-  location: location
+resource PROTEC_VM_ADMIN 'Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems@2021-12-01' = {
+  name: '${'recoveryvault'}/${backupFabric}/${protec_container_admin_win}/${protec_Item_admin_windows}' 
   properties: {
     protectedItemType: 'Microsoft.Compute/virtualMachines'
     policyId: BACK_POL.id
@@ -732,3 +776,30 @@ resource protecteditem_adminserver_sym_link 'Microsoft.RecoveryServices/vaults/b
   }
 } 
  
+resource DEPLOY_SCRIPT 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
+  name: 'deployscript-upload-blob-${utcValue}'
+  location: location
+  kind: 'AzureCLI'
+  properties: {
+    azCliVersion: '2.26.1'
+    timeout: 'PT5M'
+    retentionInterval: 'PT1H'
+    environmentVariables: [
+      {
+        name: 'AZURE_STORAGE_ACCOUNT'
+        value: store_name
+      }
+      {
+        name: 'AZURE_STORAGE_KEY'
+        secureValue: STOR_ACC.listKeys().keys[0].value
+      }
+      {
+        name: 'CONTENT'
+        value: loadFileAsBase64('./bootstrapscript/apache.sh')
+      }
+    ]
+    
+    scriptContent: 'echo $CONTENT | base64 -d > ${apachefile} && az storage blob upload -f ${apachefile} -c ${script64} -n ${apachefile}'
+  }
+}
+
