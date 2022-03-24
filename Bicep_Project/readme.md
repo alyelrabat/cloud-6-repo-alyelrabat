@@ -18,7 +18,6 @@ the engineering aspect of cloud infrastructure
 - The two VMs operate separetly in one of the two subnets.
 - Encrypted disks for the VMs
 - Linux os is for the webserver and Windows os is for the adminserver.
-- Linux os is for the webserver and Windows os is for the adminserver.
 - One recovery vault as backup
 - Blob storage with a container holding the bootstrap script.
 - Keyvault for encryptions
